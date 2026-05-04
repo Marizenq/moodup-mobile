@@ -33,6 +33,18 @@ const TRIGGERS = [
   "Sono",
   "Outro",
 ] as const;
+// Se no futuro quisermos mapear os gatilhos para chaves mais amigáveis, podemos usar esse objeto:
+const GATILHOS_MAP = {
+  "Escola/Faculdade": "escola",
+  Trabalho: "trabalho",
+  Família: "familia",
+  Trânsito: "transito",
+  Amizades: "amizades",
+  Dinheiro: "dinheiro",
+  Saúde: "saude",
+  Sono: "sono",
+  Outro: "outro",
+} as const;
 
 export default function CreateMood() {
   const router = useRouter();
@@ -46,20 +58,31 @@ export default function CreateMood() {
     useState<(typeof MOODS)[number]["key"]>("neutro");
   const [selectedTriggers, setSelectedTriggers] = useState<string[]>([]);
 
+  const [gatilhoSelecionado, setGatilhoSelecionado] = useState<string | null>(
+    null,
+  );
+  const [causaSelecionada, setCausaSelecionada] = useState<string | null>(null);
+  const [mostrarSheet, setMostrarSheet] = useState(false);
+
+  const [mostrarSugestao, setMostrarSugestao] = useState(false);
+  const [triggerParaSugestao, setTriggerParaSugestao] = useState<string | null>(
+    null,
+  );
+
   const [loading, setLoading] = useState(false);
   const [erro, setErro] = useState("");
   const [showHelp, setShowHelp] = useState(false);
 
   const moodSelected = useMemo(
     () => MOODS.find((m) => m.key === moodKey),
-    [moodKey]
+    [moodKey],
   );
 
   const lvl = Number(level);
 
   function toggleTrigger(t: string) {
     setSelectedTriggers((prev) =>
-      prev.includes(t) ? prev.filter((x) => x !== t) : [...prev, t]
+      prev.includes(t) ? prev.filter((x) => x !== t) : [...prev, t],
     );
   }
 
@@ -87,31 +110,32 @@ export default function CreateMood() {
     try {
       setLoading(true);
 
-    //   await api.post("/moods", {
-    //     title: title.trim(),
-    //     level,
-    //     date,
-    //     note: note.trim() ? note.trim() : undefined,
-    //     mood: moodKey,
-    //     triggers: selectedTriggers,
-    //   });
+      await api.post("/moods", {
+        title: title.trim(),
+        level: lvl,
+        score: lvl,
+        date,
+        note: note.trim() ? note.trim() : null,
+        mood: moodKey,
+        triggers: selectedTriggers,
+      });
 
-    await api.post("/moods", {
-  title: title.trim(),
-  level: lvl,          // ✅ garante number
-  score: lvl,          // ✅ fallback caso o backend ainda use score em algum lugar
-  date,
-  note: note.trim() ? note.trim() : null,
-  mood: moodKey,
-  triggers: selectedTriggers,
-});
+      // 🔥 REGRA DE NEGOCIO - SOMENTE SENTIMENTOS RUIm
+      const humorRuim = moodKey === "muito_triste" || moodKey === "triste";
 
+      if (humorRuim && gatilhoSelecionado) {
+        setTriggerParaSugestao(gatilhoSelecionado);
+        setMostrarSugestao(true);
+        return; // 🚨 NÃO sai da tela ainda
+      }
+
+      // fluxo normal
       router.replace("/(tabs)" as any);
     } catch (e: any) {
       setErro(
         e?.response?.data?.message ||
           e?.message ||
-          "Não foi possível criar o mood."
+          "Não foi possível criar o mood.",
       );
     } finally {
       setLoading(false);
@@ -190,14 +214,23 @@ export default function CreateMood() {
               style={s.input}
             />
 
-            <Text style={s.label}>O que pode ter estragado o dia?</Text>
+            <Text style={s.label}>O que pode ter influenciado esse humor?</Text>
             <View style={s.triggersWrap}>
               {TRIGGERS.map((t) => {
                 const active = selectedTriggers.includes(t);
                 return (
                   <Pressable
                     key={t}
-                    onPress={() => toggleTrigger(t)}
+                    onPress={() => {
+                      const chave =
+                        GATILHOS_MAP[t as keyof typeof GATILHOS_MAP];
+
+                      // 🔥 garante seleção única
+                      setSelectedTriggers([t]);
+
+                      // 🔥 define o gatilho correto
+                      setGatilhoSelecionado(chave);
+                    }}
                     style={[s.chip, active && s.chipActive]}
                   >
                     <Text style={[s.chipText, active && s.chipTextActive]}>
@@ -303,6 +336,70 @@ export default function CreateMood() {
           </View>
         </Modal>
       </View>
+      <Modal visible={mostrarSugestao} transparent animationType="slide">
+        <View
+          style={{
+            flex: 1,
+            justifyContent: "flex-end",
+            backgroundColor: "rgba(0,0,0,0.5)",
+          }}
+        >
+          <View
+            style={{
+              backgroundColor: "#0F172A",
+              padding: 20,
+              borderTopLeftRadius: 20,
+              borderTopRightRadius: 20,
+            }}
+          >
+            <Text style={{ color: "white", fontSize: 16, marginBottom: 12 }}>
+              Percebemos que você está se sentindo mal relacionado a{" "}
+              {triggerParaSugestao}.
+            </Text>
+
+            <Text style={{ color: "#CBD5E1", marginBottom: 20 }}>
+              Quer ver sugestões para lidar com isso?
+            </Text>
+
+            {/* BOTÃO SIM */}
+            <Pressable
+              onPress={() => {
+                setMostrarSugestao(false);
+
+                router.push({
+                  pathname: "/sugestoes",
+                  params: { trigger: triggerParaSugestao },
+                });
+              }}
+              style={{
+                backgroundColor: "#2563EB",
+                padding: 12,
+                borderRadius: 10,
+                marginBottom: 10,
+              }}
+            >
+              <Text style={{ color: "white", textAlign: "center" }}>Sim</Text>
+            </Pressable>
+
+            {/* BOTÃO NÃO */}
+            <Pressable
+              onPress={() => {
+                setMostrarSugestao(false);
+                router.replace("/(tabs)");
+              }}
+              style={{
+                backgroundColor: "#1F2937",
+                padding: 12,
+                borderRadius: 10,
+              }}
+            >
+              <Text style={{ color: "white", textAlign: "center" }}>
+                Agora não
+              </Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
     </KeyboardAvoidingView>
   );
 }
