@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useEffect, useCallback } from "react";
 import {
   View,
   ScrollView,
@@ -6,12 +6,11 @@ import {
   TextInput,
   Pressable,
   StyleSheet,
-  Modal,
   KeyboardAvoidingView,
   Platform,
+  Modal,
 } from "react-native";
-import { useRouter } from "expo-router";
-import { Linking } from "react-native";
+import { useRouter, useFocusEffect } from "expo-router";
 import { api } from "@/services/api";
 
 const MOODS = [
@@ -22,30 +21,6 @@ const MOODS = [
   { key: "muito_bem", emoji: "😁", label: "Ótimo" },
 ] as const;
 
-const TRIGGERS = [
-  "Trabalho",
-  "Escola/Faculdade",
-  "Família",
-  "Trânsito",
-  "Amizades",
-  "Dinheiro",
-  "Saúde",
-  "Sono",
-  "Outro",
-] as const;
-// Se no futuro quisermos mapear os gatilhos para chaves mais amigáveis, podemos usar esse objeto:
-const GATILHOS_MAP = {
-  "Escola/Faculdade": "escola",
-  Trabalho: "trabalho",
-  Família: "familia",
-  Trânsito: "transito",
-  Amizades: "amizades",
-  Dinheiro: "dinheiro",
-  Saúde: "saude",
-  Sono: "sono",
-  Outro: "outro",
-} as const;
-
 export default function CreateMood() {
   const router = useRouter();
 
@@ -53,25 +28,52 @@ export default function CreateMood() {
   const [level, setLevel] = useState<1 | 2 | 3 | 4 | 5>(3);
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [note, setNote] = useState("");
+  const [moodKey, setMoodKey] = useState<(typeof MOODS)[number]["key"]>("neutro");
+  const [selectedTriggers, setSelectedTriggers] = useState<number[]>([]);
 
-  const [moodKey, setMoodKey] =
-    useState<(typeof MOODS)[number]["key"]>("neutro");
-  const [selectedTriggers, setSelectedTriggers] = useState<string[]>([]);
-
-  const [gatilhoSelecionado, setGatilhoSelecionado] = useState<string | null>(
-    null,
-  );
-  const [causaSelecionada, setCausaSelecionada] = useState<string | null>(null);
-  const [mostrarSheet, setMostrarSheet] = useState(false);
-
-  const [mostrarSugestao, setMostrarSugestao] = useState(false);
-  const [triggerParaSugestao, setTriggerParaSugestao] = useState<string | null>(
-    null,
-  );
-
+  const [triggersList, setTriggersList] = useState<any[]>([]);
+  const [loadingTriggers, setLoadingTriggers] = useState(true);
   const [loading, setLoading] = useState(false);
   const [erro, setErro] = useState("");
-  const [showHelp, setShowHelp] = useState(false);
+
+  // Estado para o modal de ajuda
+  const [showHelpModal, setShowHelpModal] = useState(false);
+  const [triggerNamesForHelp, setTriggerNamesForHelp] = useState<string>("");
+
+  // Função para resetar o formulário
+  const resetForm = useCallback(() => {
+    setTitle("");
+    setLevel(3);
+    setDate(new Date().toISOString().slice(0, 10));
+    setNote("");
+    setMoodKey("neutro");
+    setSelectedTriggers([]);
+    setErro("");
+    setShowHelpModal(false);
+  }, []);
+
+  // Resetar quando a tela ganhar foco
+  useFocusEffect(
+    useCallback(() => {
+      resetForm();
+    }, [resetForm])
+  );
+
+  useEffect(() => {
+    async function loadTriggers() {
+      try {
+        setLoadingTriggers(true);
+        const response = await api.get('/triggers');
+        const data = response.data.data || response.data;
+        setTriggersList(data);
+      } catch (error) {
+        console.error('Erro ao carregar gatilhos:', error);
+      } finally {
+        setLoadingTriggers(false);
+      }
+    }
+    loadTriggers();
+  }, []);
 
   const moodSelected = useMemo(
     () => MOODS.find((m) => m.key === moodKey),
@@ -80,9 +82,11 @@ export default function CreateMood() {
 
   const lvl = Number(level);
 
-  function toggleTrigger(t: string) {
+  function toggleTrigger(triggerId: number) {
     setSelectedTriggers((prev) =>
-      prev.includes(t) ? prev.filter((x) => x !== t) : [...prev, t],
+      prev.includes(triggerId) 
+        ? prev.filter((id) => id !== triggerId)
+        : [...prev, triggerId]
     );
   }
 
@@ -102,11 +106,6 @@ export default function CreateMood() {
       return;
     }
 
-    // Se nível estiver baixo, mostramos o modal (sem bloquear salvar)
-    if (level <= 2) {
-      setShowHelp(true);
-    }
-
     try {
       setLoading(true);
 
@@ -117,21 +116,42 @@ export default function CreateMood() {
         date,
         note: note.trim() ? note.trim() : null,
         mood: moodKey,
-        triggers: selectedTriggers,
+        trigger_ids: selectedTriggers,
       });
 
-      // 🔥 REGRA DE NEGOCIO - SOMENTE SENTIMENTOS RUIm
+      // 🔥 Verifica se o humor é ruim (muito_triste ou triste)
       const humorRuim = moodKey === "muito_triste" || moodKey === "triste";
-
-      if (humorRuim && gatilhoSelecionado) {
-        setTriggerParaSugestao(gatilhoSelecionado);
-        setMostrarSugestao(true);
-        return; // 🚨 NÃO sai da tela ainda
+      
+      // 🔥 Verifica se tem pelo menos um gatilho selecionado
+      const temGatilho = selectedTriggers.length > 0;
+      
+      console.log("🔍 DEBUG:", { humorRuim, temGatilho, quantidadeGatilhos: selectedTriggers.length });
+      
+      if (humorRuim && temGatilho) {
+        // Pega os nomes de TODOS os triggers selecionados (funciona para 1 ou muitos)
+        const triggerNames = selectedTriggers
+          .map(id => {
+            const trigger = triggersList.find(t => t.id === id);
+            console.log("Trigger encontrado:", trigger?.name);
+            return trigger?.name;
+          })
+          .filter(Boolean)
+          .join(',');
+        
+        console.log("Trigger names enviados:", triggerNames);
+        
+        if (triggerNames) {
+          setTriggerNamesForHelp(triggerNames);
+          setShowHelpModal(true);
+          return;
+        }
       }
 
-      // fluxo normal
+      // Fluxo normal - reseta e vai para o início
+      resetForm();
       router.replace("/(tabs)" as any);
     } catch (e: any) {
+      console.error('Erro ao salvar:', e?.response?.data || e);
       setErro(
         e?.response?.data?.message ||
           e?.message ||
@@ -142,6 +162,20 @@ export default function CreateMood() {
     }
   }
 
+  const handleHelpChoice = (wantsHelp: boolean) => {
+    setShowHelpModal(false);
+    resetForm();
+
+    if (wantsHelp) {
+      router.replace({
+        pathname: "/sugestoes",
+        params: { trigger: triggerNamesForHelp }
+      } as any);
+    } else {
+      router.replace("/(tabs)/ajuda" as any);
+    }
+  };
+
   return (
     <KeyboardAvoidingView
       style={{ flex: 1 }}
@@ -149,7 +183,7 @@ export default function CreateMood() {
     >
       <View style={s.container}>
         <ScrollView
-          style={{ flex: 1 }} // ✅ garante scroll
+          style={{ flex: 1 }}
           contentContainerStyle={s.scrollContent}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
@@ -177,11 +211,11 @@ export default function CreateMood() {
               Selecionado: {moodSelected?.emoji} • {moodSelected?.label}
             </Text>
 
-            <Text style={s.label}>Título</Text>
+            <Text style={s.label}>Como você descreve hoje?</Text>
             <TextInput
               value={title}
               onChangeText={setTitle}
-              placeholder="Ex: Dia produtivo"
+              placeholder="Ex: Produtivo, cansativo, inspirador..."
               placeholderTextColor="#6B7280"
               style={s.input}
             />
@@ -203,7 +237,7 @@ export default function CreateMood() {
                 );
               })}
             </View>
-            <Text style={s.muted}>Como está hoje: {levelText(level)}</Text>
+            <Text style={s.muted}>Intensidade: {levelText(level)}</Text>
 
             <Text style={s.label}>Data (YYYY-MM-DD)</Text>
             <TextInput
@@ -215,31 +249,35 @@ export default function CreateMood() {
             />
 
             <Text style={s.label}>O que pode ter influenciado esse humor?</Text>
-            <View style={s.triggersWrap}>
-              {TRIGGERS.map((t) => {
-                const active = selectedTriggers.includes(t);
-                return (
-                  <Pressable
-                    key={t}
-                    onPress={() => {
-                      const chave =
-                        GATILHOS_MAP[t as keyof typeof GATILHOS_MAP];
-
-                      // 🔥 garante seleção única
-                      setSelectedTriggers([t]);
-
-                      // 🔥 define o gatilho correto
-                      setGatilhoSelecionado(chave);
-                    }}
-                    style={[s.chip, active && s.chipActive]}
-                  >
-                    <Text style={[s.chipText, active && s.chipTextActive]}>
-                      {t}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
+            
+            {loadingTriggers ? (
+              <Text style={s.muted}>Carregando gatilhos...</Text>
+            ) : (
+              <>
+                <View style={s.triggersWrap}>
+                  {triggersList.map((trigger) => {
+                    const active = selectedTriggers.includes(trigger.id);
+                    return (
+                      <Pressable
+                        key={trigger.id}
+                        onPress={() => toggleTrigger(trigger.id)}
+                        style={[s.chip, active && s.chipActive]}
+                      >
+                        <Text style={[s.chipText, active && s.chipTextActive]}>
+                          {trigger.label || trigger.name}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+                
+                {selectedTriggers.length > 0 && (
+                  <Text style={s.muted}>
+                    {selectedTriggers.length} gatilho(s) selecionado(s)
+                  </Text>
+                )}
+              </>
+            )}
 
             <Text style={s.label}>Observação (opcional)</Text>
             <TextInput
@@ -270,136 +308,45 @@ export default function CreateMood() {
               <Text style={s.linkText}>Voltar</Text>
             </Pressable>
 
-            {/* ✅ respiro extra pra não cortar no final */}
             <View style={{ height: 24 }} />
           </View>
         </ScrollView>
 
-        {/* Modal de apoio (nível baixo) */}
+        {/* 🔥 MODAL DE ACOLHIMENTO */}
         <Modal
-          visible={showHelp}
+          visible={showHelpModal}
           transparent
           animationType="fade"
-          onRequestClose={() => setShowHelp(false)}
+          onRequestClose={() => setShowHelpModal(false)}
         >
-          <View style={s.modalBackdrop}>
-            <View style={s.modalCard}>
-              <Text style={s.modalTitle}>Ei, vi que hoje tá pesado.</Text>
-              <Text style={s.modalText}>
-                Se você quiser, dá pra buscar apoio agora. Você não precisa
-                passar por isso sozinha.
+          <View style={s.modalOverlay}>
+            <View style={s.modalContainer}>
+              <Text style={s.modalEmoji}>💙</Text>
+              <Text style={s.modalTitle}>Você não está sozinha</Text>
+              <Text style={s.modalSubtitle}>
+                Percebemos que você está passando por um momento difícil. 
+                Gostaria de receber algumas sugestões que podem te ajudar?
               </Text>
-
-              <Pressable
-                style={s.modalBtn}
-                onPress={() => Linking.openURL("tel:188")}
-              >
-                <Text style={s.modalBtnText}>Ligar para o CVV (188)</Text>
-              </Pressable>
-
-              <Pressable
-                style={[
-                  s.modalBtn,
-                  { backgroundColor: "rgba(255,255,255,.06)" },
-                ]}
-                onPress={() => {
-                  setShowHelp(false);
-                  router.push("/ai" as any);
-                }}
-              >
-                <Text style={[s.modalBtnText, { color: "#e7ecff" }]}>
-                  Falar com a IA agora
-                </Text>
-              </Pressable>
-
-              <Pressable
-                style={[s.modalBtn, { backgroundColor: "#2dd4bf" }]}
-                onPress={() => {
-                  setShowHelp(false);
-                  // router.push("/(tabs)/psicologa" as any)
-                }}
-              >
-                <Text style={[s.modalBtnText, { color: "#08101a" }]}>
-                  Contato da psicóloga
-                </Text>
-              </Pressable>
-
-              <Pressable
-                onPress={() => setShowHelp(false)}
-                style={{ marginTop: 10 }}
-              >
-                <Text style={[s.linkText, { textAlign: "center" }]}>
-                  Fechar
-                </Text>
-              </Pressable>
+              
+              <View style={s.modalButtons}>
+                <Pressable
+                  style={[s.modalBtn, s.modalBtnSim]}
+                  onPress={() => handleHelpChoice(true)}
+                >
+                  <Text style={s.modalBtnSimText}>Sim, quero ajuda</Text>
+                </Pressable>
+                
+                <Pressable
+                  style={[s.modalBtn, s.modalBtnNao]}
+                  onPress={() => handleHelpChoice(false)}
+                >
+                  <Text style={s.modalBtnNaoText}>Não, obrigado</Text>
+                </Pressable>
+              </View>
             </View>
           </View>
         </Modal>
       </View>
-      <Modal visible={mostrarSugestao} transparent animationType="slide">
-        <View
-          style={{
-            flex: 1,
-            justifyContent: "flex-end",
-            backgroundColor: "rgba(0,0,0,0.5)",
-          }}
-        >
-          <View
-            style={{
-              backgroundColor: "#0F172A",
-              padding: 20,
-              borderTopLeftRadius: 20,
-              borderTopRightRadius: 20,
-            }}
-          >
-            <Text style={{ color: "white", fontSize: 16, marginBottom: 12 }}>
-              Percebemos que você está se sentindo mal relacionado a{" "}
-              {triggerParaSugestao}.
-            </Text>
-
-            <Text style={{ color: "#CBD5E1", marginBottom: 20 }}>
-              Quer ver sugestões para lidar com isso?
-            </Text>
-
-            {/* BOTÃO SIM */}
-            <Pressable
-              onPress={() => {
-                setMostrarSugestao(false);
-
-                router.push({
-                  pathname: "/sugestoes",
-                  params: { trigger: triggerParaSugestao },
-                });
-              }}
-              style={{
-                backgroundColor: "#2563EB",
-                padding: 12,
-                borderRadius: 10,
-                marginBottom: 10,
-              }}
-            >
-              <Text style={{ color: "white", textAlign: "center" }}>Sim</Text>
-            </Pressable>
-
-            {/* BOTÃO NÃO */}
-            <Pressable
-              onPress={() => {
-                setMostrarSugestao(false);
-                router.replace("/(tabs)");
-              }}
-              style={{
-                backgroundColor: "#1F2937",
-                padding: 12,
-                borderRadius: 10,
-              }}
-            >
-              <Text style={{ color: "white", textAlign: "center" }}>
-                Agora não
-              </Text>
-            </Pressable>
-          </View>
-        </View>
-      </Modal>
     </KeyboardAvoidingView>
   );
 }
@@ -456,7 +403,7 @@ const s = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  emojiBtnActive: { borderColor: "rgba(109,94,252,.9)" },
+  emojiBtnActive: { borderColor: "#2dd4bf" },
   emoji: { fontSize: 26 },
   muted: { color: "#94A3B8", marginTop: 6 },
 
@@ -472,63 +419,101 @@ const s = StyleSheet.create({
     justifyContent: "center",
   },
   levelBtnActive: {
-    borderColor: "#2563EB",
-    backgroundColor: "rgba(37,99,235,.15)",
+    borderColor: "#2dd4bf",
+    backgroundColor: "rgba(45,212,191,.15)",
   },
   levelText: { color: "#E5E7EB", fontWeight: "800" },
-  levelTextActive: { color: "#93C5FD" },
+  levelTextActive: { color: "#2dd4bf" },
 
-  triggersWrap: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  triggersWrap: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 8 },
   chip: {
     paddingVertical: 8,
-    paddingHorizontal: 10,
-    borderRadius: 999,
+    paddingHorizontal: 12,
+    borderRadius: 20,
     borderWidth: 1,
     borderColor: "#243041",
     backgroundColor: "#0B1220",
   },
   chipActive: {
     borderColor: "#2dd4bf",
-    backgroundColor: "rgba(45,212,191,.12)",
+    backgroundColor: "rgba(45,212,191,.15)",
   },
-  chipText: { color: "#E5E7EB", fontWeight: "700", fontSize: 12 },
-  chipTextActive: { color: "#A7F3D0" },
+  chipText: { color: "#E5E7EB", fontWeight: "500", fontSize: 13 },
+  chipTextActive: { color: "#2dd4bf" },
 
   errorText: { color: "#ff6b6b", marginTop: 10, fontSize: 13 },
   button: {
-    backgroundColor: "#2563EB",
+    backgroundColor: "#2dd4bf",
     borderRadius: 12,
     paddingVertical: 14,
     alignItems: "center",
     marginTop: 16,
   },
-  buttonText: { color: "#FFFFFF", fontWeight: "800", letterSpacing: 0.4 },
+  buttonText: { color: "#08101a", fontWeight: "800", letterSpacing: 0.4 },
   linkText: { color: "#E5E7EB", opacity: 0.9 },
 
-  modalBackdrop: {
+  modalOverlay: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,.55)",
-    alignItems: "center",
+    backgroundColor: "rgba(0,0,0,0.7)",
     justifyContent: "center",
-    padding: 18,
+    alignItems: "center",
+    padding: 20,
   },
-  modalCard: {
-    width: "100%",
-    maxWidth: 520,
+  modalContainer: {
     backgroundColor: "#0F172A",
-    borderColor: "rgba(255,255,255,.10)",
+    borderRadius: 24,
+    padding: 24,
+    width: "100%",
+    maxWidth: 340,
+    alignItems: "center",
     borderWidth: 1,
-    borderRadius: 16,
-    padding: 18,
+    borderColor: "#2dd4bf",
   },
-  modalTitle: { color: "#E5E7EB", fontSize: 18, fontWeight: "900" },
-  modalText: { color: "#94A3B8", marginTop: 8, marginBottom: 12 },
+  modalEmoji: {
+    fontSize: 48,
+    marginBottom: 16,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: "bold",
+    color: "#E5E7EB",
+    textAlign: "center",
+    marginBottom: 12,
+  },
+  modalSubtitle: {
+    fontSize: 14,
+    color: "#94A3B8",
+    textAlign: "center",
+    marginBottom: 24,
+    lineHeight: 20,
+  },
+  modalButtons: {
+    flexDirection: "row",
+    gap: 12,
+    width: "100%",
+  },
   modalBtn: {
-    backgroundColor: "#2563EB",
+    flex: 1,
     paddingVertical: 12,
     borderRadius: 12,
     alignItems: "center",
-    marginTop: 10,
   },
-  modalBtnText: { color: "#fff", fontWeight: "900" },
+  modalBtnSim: {
+    backgroundColor: "#2dd4bf",
+  },
+  modalBtnSimText: {
+    color: "#08101a",
+    fontWeight: "bold",
+    fontSize: 14,
+  },
+  modalBtnNao: {
+    backgroundColor: "#1F2937",
+    borderWidth: 1,
+    borderColor: "#374151",
+  },
+  modalBtnNaoText: {
+    color: "#E5E7EB",
+    fontWeight: "500",
+    fontSize: 14,
+  },
 });

@@ -16,11 +16,11 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="index"
         options={{
-          title: "Ínicio",
-          tabBarLabel: "Ínicio",
-           tabBarIcon: ({ color, size }) => <Ionicons name="storefront-outline" color={color} size={size} />,
+          title: "Início",
+          tabBarLabel: "Início",
+          tabBarIcon: ({ color, size }) => <Ionicons name="home-outline" color={color} size={size} />,
         }}
-  />
+      />
 
       <Tabs.Screen
         name="create"
@@ -28,24 +28,6 @@ export default function TabsLayout() {
           title: "Criar Mood",
           tabBarLabel: "Criar",
           tabBarIcon: ({ color, size }) => <Ionicons name="add-circle" color={color} size={size} />,
-        }}
-      />
-
-      <Tabs.Screen
-        name="dashboard"
-        options={{
-          title: "Dashboard",
-          tabBarLabel: "Dashboard",
-          tabBarIcon: ({ color, size }) => <Ionicons name="stats-chart" color={color} size={size} />,
-        }}
-      />
-
-      <Tabs.Screen
-        name="ai"
-        options={{
-          title: "IA",
-          tabBarLabel: "IA",
-          tabBarIcon: ({ color, size }) => <Ionicons name="chatbubbles" color={color} size={size} />,
         }}
       />
 
@@ -59,17 +41,31 @@ export default function TabsLayout() {
       />
 
       <Tabs.Screen
-  name="perfil"
-  options={{
-    title: "Perfil",
-    tabBarLabel: "Perfil",
-    tabBarIcon: ({ color, size }) => (
-      <Ionicons name="person" color={color} size={size} />
-    ),
-  }}
-/>
+        name="sugestoes"
+        options={{
+          title: "Conversa",
+          tabBarLabel: "Conversa",
+          tabBarIcon: ({ color, size }) => <Ionicons name="chatbubbles" color={color} size={size} />,
+        }}
+      />
 
+      <Tabs.Screen
+        name="dashboard"
+        options={{
+          title: "Dashboard",
+          tabBarLabel: "Dashboard",
+          tabBarIcon: ({ color, size }) => <Ionicons name="stats-chart" color={color} size={size} />,
+        }}
+      />
 
+      <Tabs.Screen
+        name="perfil"
+        options={{
+          title: "Perfil",
+          tabBarLabel: "Perfil",
+          tabBarIcon: ({ color, size }) => <Ionicons name="person" color={color} size={size} />,
+        }}
+      />
     </Tabs>
   );
 }
