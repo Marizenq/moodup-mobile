@@ -9,6 +9,7 @@ import {
     StyleSheet,
     Text,
     View,
+    TextInput,
 } from "react-native";
 
 type Mood = {
@@ -36,7 +37,9 @@ export default function AjudaScreen() {
   const [resources, setResources] = useState<Resource[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Recarregar quando a tela ganhar foco
+  const [search, setSearch] = useState("");
+  const [filterType, setFilterType] = useState<"todos" | Resource["type"]>("todos");
+
   useFocusEffect(
     useCallback(() => {
       loadData();
@@ -46,17 +49,11 @@ export default function AjudaScreen() {
   async function loadData() {
     try {
       setLoading(true);
-      
-      // 1) último mood
+
       const moodsRes = await api.get("/moods?per_page=1");
       const mood = moodsRes.data?.data?.[0] ?? null;
-      
-      console.log("📊 Último mood carregado:", mood);
-      console.log("📊 Nível do mood:", mood?.level);
-      
       setLastMood(mood);
 
-      // 2) recursos do back
       const resRes = await api.get("/resources?per_page=50");
       const list: Resource[] = resRes.data?.data ?? [];
       setResources(list);
@@ -67,21 +64,32 @@ export default function AjudaScreen() {
     }
   }
 
-  // Forçar recarga ao entrar na tela
   useEffect(() => {
     loadData();
   }, []);
 
   const level = lastMood?.level ?? 3;
-  
-  // Determinar o estado baseado no nível
+
   const getMoodState = () => {
     if (level <= 2) return "bad";
     if (level === 3) return "neutral";
     return "good";
   };
-  
+
   const moodState = getMoodState();
+
+  const filteredResources = useMemo(() => {
+    return resources.filter((r) => {
+      const matchSearch =
+        r.title.toLowerCase().includes(search.toLowerCase()) ||
+        (r.description || "").toLowerCase().includes(search.toLowerCase());
+
+      const matchType =
+        filterType === "todos" || r.type === filterType;
+
+      return matchSearch && matchType;
+    });
+  }, [resources, search, filterType]);
 
   const byType = useMemo(() => {
     const map = {
@@ -91,12 +99,12 @@ export default function AjudaScreen() {
       livro: [] as Resource[],
     };
 
-    for (const r of resources) {
+    for (const r of filteredResources) {
       if (r?.type && map[r.type]) map[r.type].push(r);
     }
 
     return map;
-  }, [resources]);
+  }, [filteredResources]);
 
   function openUrl(url?: string | null) {
     if (!url) return;
@@ -147,13 +155,38 @@ export default function AjudaScreen() {
     <ScrollView style={s.container} contentContainerStyle={{ padding: 16, paddingBottom: 30 }}>
       <Text style={s.title}>Auxílio Personalizado</Text>
 
-      {/* CONTEÚDO PARA HUMOR BOM/ÓTIMO (level >= 4) */}
+      {/* 🔍 BUSCA */}
+      <TextInput
+        value={search}
+        onChangeText={setSearch}
+        placeholder="Buscar recurso..."
+        placeholderTextColor="#6B7280"
+        style={s.input}
+      />
+
+      {/* 🎯 FILTROS */}
+      <View style={s.filterRow}>
+        {["todos","video","musica","livro","exercicio"].map((type) => (
+          <Pressable
+            key={type}
+            onPress={() => setFilterType(type as any)}
+            style={[
+              s.chip,
+              filterType === type && s.chipActive
+            ]}
+          >
+            <Text style={{ color: "#E5E7EB" }}>{type}</Text>
+          </Pressable>
+        ))}
+      </View>
+
+      {/* GOOD */}
       {moodState === "good" && (
         <>
           <View style={s.goodCard}>
             <Text style={s.goodTitle}>🌟 Que bom que você está bem!</Text>
             <Text style={s.goodText}>
-              Aproveite este momento para se desenvolver ainda mais. Separamos algumas dicas para você:
+              Aproveite este momento para se desenvolver ainda mais.
             </Text>
           </View>
 
@@ -164,13 +197,13 @@ export default function AjudaScreen() {
         </>
       )}
 
-      {/* CONTEÚDO PARA HUMOR NEUTRO (level === 3) */}
+      {/* NEUTRAL */}
       {moodState === "neutral" && (
         <>
           <View style={s.neutralCard}>
             <Text style={s.neutralTitle}>🌿 Dia estável</Text>
             <Text style={s.neutralText}>
-              Manter o equilíbrio é importante. Aqui estão algumas sugestões para continuar bem:
+              Manter o equilíbrio é importante.
             </Text>
           </View>
 
@@ -180,27 +213,23 @@ export default function AjudaScreen() {
         </>
       )}
 
-      {/* CONTEÚDO PARA HUMOR RUIM (level <= 2) */}
+      {/* BAD */}
       {moodState === "bad" && (
         <>
           <View style={s.alertCard}>
             <Text style={s.alertTitle}>💙 Você não está sozinha</Text>
             <Text style={s.alertText}>
-              Percebemos que seu último registro indica um momento difícil. 
               Aqui estão alguns recursos que podem ajudar:
             </Text>
           </View>
 
-          {/* Botão CVV 188 */}
-          <Pressable 
-            style={s.cvvButton} 
-            onPress={() => Linking.openURL("tel:188")}
-          >
+          {/* CVV */}
+          <Pressable style={s.cvvButton} onPress={() => Linking.openURL("tel:188")}>
             <Text style={s.cvvButtonText}>📞 Ligar para o CVV (188)</Text>
             <Text style={s.cvvButtonSubtext}>Atendimento gratuito 24h</Text>
           </Pressable>
 
-          {/* Botão Psicóloga */}
+          {/* 🔥 PSICÓLOGA RESTAURADA */}
           <Pressable 
             style={s.psicologaButton} 
             onPress={() => Linking.openURL("mailto:psicologa@moodup.com.br")}
@@ -209,11 +238,8 @@ export default function AjudaScreen() {
             <Text style={s.psicologaButtonSubtext}>Envie um e-mail para agendar</Text>
           </Pressable>
 
-          {/* Botão Conversar com IA */}
-          <Pressable 
-            style={s.aiButton} 
-            onPress={() => router.push("/(tabs)/sugestoes")}
-          >
+          {/* IA */}
+          <Pressable style={s.aiButton} onPress={() => router.push("/(tabs)/sugestoes")}>
             <Text style={s.aiButtonText}>💬 Conversar com a IA</Text>
             <Text style={s.aiButtonSubtext}>Desabafe de forma anônima</Text>
           </Pressable>
@@ -223,96 +249,47 @@ export default function AjudaScreen() {
           {renderSection("🎵 Músicas para relaxar", byType.musica)}
         </>
       )}
-
-      {/* Se vier vazio do back */}
-      {resources.length === 0 && (
-        <Text style={[s.meta, { marginTop: 16 }]}>
-          Nenhum recurso encontrado. Verifique se o seed rodou e se a rota /resources está funcionando.
-        </Text>
-      )}
     </ScrollView>
   );
 }
 
 const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#0B0F19" },
-  loading: { flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: "#0B0F19" },
+  loading: { flex: 1, justifyContent: "center", alignItems: "center" },
 
-  title: { color: "#E5E7EB", fontSize: 24, fontWeight: "900", marginBottom: 8 },
+  title: { color: "#E5E7EB", fontSize: 24, fontWeight: "900" },
 
-  // Cards de humor BOM
-  goodCard: {
-    backgroundColor: "rgba(34, 197, 94, 0.1)",
-    borderRadius: 16,
-    padding: 16,
-    marginTop: 12,
+  input: {
+    backgroundColor: "#0B1220",
+    borderColor: "#243041",
     borderWidth: 1,
-    borderColor: "rgba(34, 197, 94, 0.3)",
+    borderRadius: 12,
+    padding: 10,
+    color: "#E5E7EB",
+    marginTop: 12,
   },
-  goodTitle: { color: "#22c55e", fontSize: 18, fontWeight: "900", marginBottom: 8 },
-  goodText: { color: "#CBD5E1", fontSize: 14, lineHeight: 20 },
 
-  // Cards de humor NEUTRO
-  neutralCard: {
-    backgroundColor: "rgba(234, 179, 8, 0.1)",
+  filterRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    marginTop: 10,
+  },
+
+  chip: {
+    paddingVertical: 6,
+    paddingHorizontal: 10,
     borderRadius: 16,
-    padding: 16,
-    marginTop: 12,
     borderWidth: 1,
-    borderColor: "rgba(234, 179, 8, 0.3)",
+    borderColor: "#243041",
   },
-  neutralTitle: { color: "#eab308", fontSize: 18, fontWeight: "900", marginBottom: 8 },
-  neutralText: { color: "#CBD5E1", fontSize: 14, lineHeight: 20 },
 
-  // Cards de alerta (humor RUIM)
-  alertCard: {
-    backgroundColor: "rgba(250, 204, 21, 0.1)",
-    borderRadius: 16,
-    padding: 16,
-    marginTop: 12,
-    borderWidth: 1,
-    borderColor: "rgba(250, 204, 21, 0.3)",
+  chipActive: {
+    borderColor: "#2dd4bf",
+    backgroundColor: "rgba(45,212,191,.15)",
   },
-  alertTitle: { color: "#facc15", fontSize: 18, fontWeight: "900", marginBottom: 8 },
-  alertText: { color: "#CBD5E1", fontSize: 14, lineHeight: 20 },
 
-  // Botão CVV
-  cvvButton: {
-    backgroundColor: "#cf6060",
-    borderRadius: 14,
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-    marginTop: 16,
-    alignItems: "center",
-  },
-  cvvButtonText: { color: "#4e4646", fontSize: 16, fontWeight: "900" },
-  cvvButtonSubtext: { color: "#4e4646", fontSize: 12, marginTop: 4 },
-
-  // Botão Psicóloga
-  psicologaButton: {
-    backgroundColor: "#72dbc1",
-    borderRadius: 14,
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-    marginTop: 12,
-    alignItems: "center",
-  },
-  psicologaButtonText: { color: "#4e4646", fontSize: 16, fontWeight: "900" },
-  psicologaButtonSubtext: { color: "#4e4646", fontSize: 12, marginTop: 4 },
-
-  // Botão IA
-  aiButton: {
-    backgroundColor: "#85a3e2",
-    borderRadius: 14,
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-    marginTop: 12,
-    alignItems: "center",
-  },
-  aiButtonText: { color: "#4e4646", fontSize: 16, fontWeight: "900" },
-  aiButtonSubtext: { color: "#4e4646", fontSize: 12, marginTop: 4 },
-
-  sectionTitle: { color: "#E5E7EB", fontSize: 18, fontWeight: "800", marginTop: 16 },
+  sectionTitle: { color: "#E5E7EB", fontSize: 18, fontWeight: "800" },
 
   card: {
     backgroundColor: "#0F172A",
@@ -323,15 +300,84 @@ const s = StyleSheet.create({
   },
 
   cardTitle: { color: "#E5E7EB", fontWeight: "900" },
-  meta: { color: "#94A3B8", marginTop: 6, fontSize: 12 },
-  cardDesc: { color: "#94A3B8", marginTop: 8 },
+  meta: { color: "#94A3B8", fontSize: 12 },
+  cardDesc: { color: "#94A3B8" },
 
   btn: {
-    marginTop: 12,
+    marginTop: 10,
     backgroundColor: "#2dd4bf",
-    paddingVertical: 10,
-    borderRadius: 12,
+    padding: 10,
+    borderRadius: 10,
     alignItems: "center",
   },
-  btnText: { color: "#08101a", fontWeight: "900" },
+
+  btnText: { fontWeight: "900" },
+
+  goodCard: {
+    backgroundColor: "rgba(34, 197, 94, 0.1)",
+    borderRadius: 16,
+    padding: 16,
+    marginTop: 12,
+    borderWidth: 1,
+    borderColor: "rgba(34, 197, 94, 0.3)",
+  },
+
+  neutralCard: {
+    backgroundColor: "rgba(234, 179, 8, 0.1)",
+    borderRadius: 16,
+    padding: 16,
+    marginTop: 12,
+    borderWidth: 1,
+    borderColor: "rgba(234, 179, 8, 0.3)",
+  },
+
+  alertCard: {
+    backgroundColor: "rgba(250, 204, 21, 0.1)",
+    borderRadius: 16,
+    padding: 16,
+    marginTop: 12,
+    borderWidth: 1,
+    borderColor: "rgba(250, 204, 21, 0.3)",
+  },
+
+  goodTitle: { color: "#22c55e", fontSize: 18, fontWeight: "900" },
+  neutralTitle: { color: "#eab308", fontSize: 18, fontWeight: "900" },
+  alertTitle: { color: "#facc15", fontSize: 18, fontWeight: "900" },
+
+  goodText: { color: "#CBD5E1" },
+  neutralText: { color: "#CBD5E1" },
+  alertText: { color: "#CBD5E1" },
+
+  cvvButton: {
+    backgroundColor: "#cf6060",
+    borderRadius: 14,
+    padding: 14,
+    marginTop: 12,
+    alignItems: "center",
+  },
+
+  cvvButtonText: { color: "#fff", fontWeight: "900" },
+  cvvButtonSubtext: { color: "#fff", fontSize: 12 },
+
+  psicologaButton: {
+    backgroundColor: "#72dbc1",
+    borderRadius: 14,
+    padding: 14,
+    marginTop: 12,
+    alignItems: "center",
+  },
+
+  psicologaButtonText: { color: "#08101a", fontWeight: "900" },
+  psicologaButtonSubtext: { color: "#08101a", fontSize: 12 },
+
+  aiButton: {
+    backgroundColor: "#85a3e2",
+    borderRadius: 14,
+    padding: 14,
+    marginTop: 12,
+    alignItems: "center",
+  },
+
+  aiButtonText: { color: "#08101a", fontWeight: "900" },
+  aiButtonSubtext: { color: "#08101a", fontSize: 12 },
 });
